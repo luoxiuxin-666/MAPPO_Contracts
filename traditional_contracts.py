@@ -67,7 +67,7 @@ class TraditionalContractOptimizer:
         """
         使用差分进化算法求解最优 R 序列。
         """
-        print("Traditional Optimizer is calculating the best contract...")
+        # print("Traditional Optimizer is calculating the best contract...")
 
         # 定义搜索边界：每个 R_k 都在 [R_min, R_max] 之间
         bounds = [(5,50)] * self.uav_num
@@ -92,6 +92,7 @@ class TraditionalContractOptimizer:
         best_utility = -result.fun
 
         return best_R, best_U, best_utility
+
 # --- 测试代码 ---
 if __name__ == '__main__':
     from MAPPO_Contract_Env import Multi_Contract_Environment

@@ -2,7 +2,10 @@
 # -*- coding: utf-8 -*-
 # @Time    : 2025/4/22 0022 11:11
 # @File    : Multi_Contract_RL.py
+import copy
+import random
 
+from traditional_contracts import TraditionalContractOptimizer
 import numpy as np
 import matplotlib.pyplot as plt
 from UsualFunctions import LOG, CommonFun
@@ -16,6 +19,9 @@ import shutil
 from plot_metrics_new import plot_all_metrics
 from plot_picture import plot_learning_curves
 import datetime
+from fixed_ppo import PPO
+from fixed_train import run_fixed_train
+
 
 # 创建结构化的结果目录
 result_base_dir = "results"
@@ -76,23 +82,37 @@ def Multi_Contract_Play():
     R_min = configDict['R_min']
     R_max = configDict['R_max']
     R_RANGE = (R_min, R_max)
+    Fixed_PPO = True
+    Traditional_Contract = True
 
     # 使用双端队列来记录指标,最大元素为每一批次的步数
     avg_reward_per_episode = deque(maxlen=batch_size)
     avg_utility_per_episode = deque(maxlen=batch_size)
 
-    avg_reward_per_episode_list = []
-    avg_utility_per_episode_list = []
-    actor_loss_list = []
-    critic_loss_list = []
-    entropy_list = []
-
     # 记录每20轮的激励，用来判断学习率是否需要更新
     rewards_window = deque(maxlen=10)
     best_mean_reward = -float('inf')
 
+    metrics_dict = {
+        # "avg_agents_utility": [],
+        "mappo_contract_reward": [],
+        "traditional_contract_reward": [],
+        "fixed_pricing_reward": [],
+        "Average_Policy_Loss": [],
+        "Average_Value_Loss": [],
+        "Average_Entropy": []
+    }
+
     # 创建MAPPO智能体（共有agent_num个actor, 一个共享critic）
     mappo = MAPPO(agent_num, state_dim, action_dim, actor_lr, critic_lr, lmbda, gamma, eps, K_epochs, device, R_RANGE,total_episode)
+    if Fixed_PPO:
+        fixed_state_dim = env.agent_num * env.uav_num
+        fixed_action_dim = env.uav_num + 1
+        ppo = PPO(fixed_state_dim,fixed_action_dim)
+        fixed_env = copy.deepcopy(env)
+
+    if Traditional_Contract:
+        traditional_env = copy.deepcopy(env)
 
     log.LogRecord('Initialize agents success......')
 
@@ -137,7 +157,7 @@ def Multi_Contract_Play():
                 buffers[agent_i]['states'].append(np.array(multi_states[agent_i]))
                 buffers[agent_i]['actions_raw'].append(actions[agent_i])
                 buffers[agent_i]['next_states'].append(np.array(next_multi_state[agent_i]))
-                buffers[agent_i]['rewards'].append(shared_reward)
+                buffers[agent_i]['rewards'].append(avg_reward)
                 buffers[agent_i]['log_probs'].append(log_probs[agent_i])
 
             multi_states = next_multi_state
@@ -156,11 +176,17 @@ def Multi_Contract_Play():
         # 记录奖励值
         rewards_window.append(np.mean(avg_reward_per_episode))
 
-        # 保存模型的权重参数
-        if episode % 500 == 0:
-            mappo.save_model()
-            # log_message(f"Model saved at episode {episode}")
-            # 创建指标字典
+        if Traditional_Contract:
+            traditional_env.Reset()
+            optimizer = TraditionalContractOptimizer(traditional_env)
+            r_best, u_best, util = optimizer.solve()
+            tra_multi_reward, tra_next_multi_state, tra_contracts = traditional_env.step_2(r_best,u_best,1)
+            traditional_reward = np.mean(tra_multi_reward)
+
+        if Fixed_PPO:
+            fixed_env.Reset()
+            fixed_state = [random.randint(0, 1) for _ in range(env.uav_num*env.agent_num)]
+            fixed_reward, unit_price = run_fixed_train(ppo, fixed_env, fixed_state)
 
         # 每10轮修改一次学习率
         if episode%10 ==0:
@@ -182,18 +208,10 @@ def Multi_Contract_Play():
                 scheduler.step(mean_reward)
             mappo.critic_scheduler.step(mean_reward)
 
-            avg_utility_per_episode_list.append(np.mean(avg_utility_per_episode))
-            avg_reward_per_episode_list.append(np.mean(avg_reward_per_episode))
-            actor_loss_list.append(a_loss)
-            critic_loss_list.append(c_loss)
-            entropy_list.append(entropy)
-            metrics_dict = {
-                "avg_agents_utility": avg_utility_per_episode_list,
-                "avg_rewards": avg_reward_per_episode_list,
-                "Average_Policy_Loss": actor_loss_list,
-                "Average_Value_Loss": critic_loss_list,
-                "Average_Entropy": entropy_list
-            }
+            metrics_dict['mappo_contract_reward'].append(avg_reward)
+            metrics_dict['traditional_contract_reward'].append(traditional_reward)
+            metrics_dict['fixed_pricing_reward'].append(fixed_reward)
+
             # 调用新的绘图函数
             # plot_all_metrics(metrics_dict, episode)
             plot_learning_curves(metrics_dict, episode, 'mappo', window_size=20)
@@ -205,9 +223,11 @@ def Multi_Contract_Play():
             record_data.save_to_csv('agent', 'agent_results.csv')
             record_data.save_to_csv('uav', 'uav_results.csv')
 
+        # 保存模型的权重参数
+        if episode % 500 == 0:
+            mappo.save_model()
+
 
         # ------------------------------------------------------------------
 if __name__ == '__main__':
     Multi_Contract_Play()
-    current_time = datetime.now()
-    print(f"训练结束时间为：{current_time}")

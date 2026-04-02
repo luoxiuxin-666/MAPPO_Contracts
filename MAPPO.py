@@ -45,7 +45,7 @@ class PolicyNet(nn.Module):
             factor=0.5,  # 当触发时，学习率变为原来的一半
             patience=10,  # 如果连续10次评估，平均奖励都没有创下新高，就降低LR
             min_lr=1e-8,  # 学习率最低不会低于 1e-6
-            verbose=True  # 降低时打印提示
+            # verbose=True  # 降低时打印提示
         )
 
         for param in self.parameters():
@@ -102,7 +102,7 @@ class CentralValueNet(nn.Module):
             factor=0.5,  # 当触发时，学习率变为原来的一半
             patience=10,  # 如果连续10次评估，平均奖励都没有创下新高，就降低LR
             min_lr=1e-7,  # 学习率最低不会低于 1e-6
-            verbose=True  # 降低时打印提示
+            # verbose=True  # 降低时打印提示
         )
 
 
