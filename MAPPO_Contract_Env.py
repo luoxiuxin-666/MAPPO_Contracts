@@ -158,7 +158,7 @@ class Multi_Contract_Environment:
 
         for i in range(1,self.uav_num+1):
             uav = UAV(f'uav_{i}', E_tot_list[i-1], self.E_u)
-            uav.resource_limit = E_tot_list[i-1]*self.agent_num * 30
+            uav.resource_limit = E_tot_list[i-1]*(self.agent_num-0.5) * (35-(i-1)*5) # 默认留出竞争空间
             uav.resource_base = uav.resource_limit
             self.UAVs.append(uav)
         for i in range(1,self.agent_num+1):
@@ -283,13 +283,13 @@ class Multi_Contract_Environment:
             candidate_contracts = []
             for i, agent in enumerate(self.Agents):
                 # 同样，只考虑有效的合同
-                is_valid = np.all(agent.Monotonicity_State == 1) and agent.IR_State_List[k] == 1
-                if is_valid:
-                    candidate_contracts.append({
-                        'agent_idx': i,
-                        'R': int(agent.uav_r_list[k]),
-                        'U': agent.uav_u_list[k]
-                    })
+                # is_valid = np.all(agent.Monotonicity_State == 1) and agent.IR_State_List[k] == 1
+                # if is_valid:
+                candidate_contracts.append({
+                    'agent_idx': i,
+                    'R': int(agent.uav_r_list[k]),
+                    'U': agent.uav_u_list[k]
+                })
 
             if not candidate_contracts:
                 continue
@@ -338,7 +338,7 @@ class Multi_Contract_Environment:
             agent.reward = 0
             agent.utility = 0
         for uav in self.UAVs:
-            base = rng.integers(-10, 11)
+            base = rng.integers(-5, 5)
             uav.resource_limit = uav.resource_base + base
         return self.Get_Multi_State(), {}
 
@@ -364,12 +364,12 @@ class Multi_Contract_Environment:
         multi_reward = self._compute_all_rewards()
 
         next_multi_state = self.Get_Multi_State()
-        # is_valid = np.all(self.Agents[0].Monotonicity_State == 1) and np.all(self.Agents[0].IR_State_List == 1)
-        # infos = { "r": self.Agents[0].uav_r_list, "u": self.Agents[0].uav_u_list,"valid_uav":is_valid}
+
+        acceptance_rate = [sum(agent.P_State_List) for agent in self.Agents]
 
         # 记录一下集群的选择以及效用
         self.record_UAVs_Utility()
-        return multi_reward, next_multi_state, contracts
+        return multi_reward, next_multi_state, contracts,acceptance_rate
 
     def _compute_agent_utility(self, agent):
         """计算单个智能体的总效用，只计入被选中的合同。"""
@@ -396,7 +396,7 @@ class Multi_Contract_Environment:
             is_valid = np.all(agent.Monotonicity_State == 1) and np.all(agent.IR_State_List == 1)
             if is_valid:
                 agent.utility = self._compute_agent_utility(agent)
-                reward = self.REWARD_SUCCESS + agent.utility
+                reward = agent.utility
             else:
                 reward = self.PENALTY_INVALID_IN_PHASE2
             agent.reward = reward
@@ -414,6 +414,41 @@ class Multi_Contract_Environment:
                     uav.select_Agent.append(j)
                     uav.utility_list.append(agent.uav_u_list[i] - agent.uav_r_list[i]*uav.total_energy)
 
+    def step_2(self,R_k,U_k,mode):
+        contracts = []
+        # 1. 为每个智能体解码动作，并更新其内部状态
+        for i, agent in enumerate(self.Agents):
+            # c) 保存 R 和 U
+            agent.uav_r_list = R_k
+            agent.uav_u_list = U_k
+            contracts.append([R_k, U_k])
+            if mode == 1:
+                # d) 检查 IR 约束
+                self._check_constraints(agent)
+
+        self._uavs_select_contracts_dp()
+
+        multi_reward = self.compare_rewards_()
+
+        next_multi_state = [item for agent in self.Agents for item in agent.P_State_List]
+        # is_valid = np.all(self.Agents[0].Monotonicity_State == 1) and np.all(self.Agents[0].IR_State_List == 1)
+        # infos = { "r": self.Agents[0].uav_r_list, "u": self.Agents[0].uav_u_list,"valid_uav":is_valid}
+
+        # 记录一下集群的选择以及效用
+        self.record_UAVs_Utility()
+        acceptance_rate = [sum(agent.P_State_List) for agent in self.Agents]
+        return multi_reward, next_multi_state, contracts,acceptance_rate
+
+    def compare_rewards_(self):
+        """根据当前课程阶段，计算所有智能体的奖励。"""
+        multi_reward = []
+        for agent in self.Agents:
+            agent.utility = 0.0
+            agent.utility = self._compute_agent_utility(agent)
+            reward = agent.utility
+            agent.reward = reward
+            multi_reward.append(reward)
+        return multi_reward
 # -----------------
 # 独立测试环境的示例
 if __name__ == '__main__':

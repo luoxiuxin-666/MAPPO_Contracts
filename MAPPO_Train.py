@@ -2,7 +2,10 @@
 # -*- coding: utf-8 -*-
 # @Time    : 2025/4/22 0022 11:11
 # @File    : Multi_Contract_RL.py
-
+import copy
+import random
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from traditional_contracts import TraditionalContractOptimizer
 import numpy as np
 import matplotlib.pyplot as plt
 from UsualFunctions import LOG, CommonFun
@@ -13,9 +16,12 @@ from collections import deque
 import torch
 import os
 import shutil
-from plot_metrics_new import plot_all_metrics
+from plot_picture_2 import plot_learning_curves_
 from plot_picture import plot_learning_curves
 import datetime
+from fixed_ppo import PPO
+from fixed_train import run_fixed_train
+from data_manager import ExperimentDataManager
 
 # 创建结构化的结果目录
 result_base_dir = "results"
@@ -76,23 +82,47 @@ def Multi_Contract_Play():
     R_min = configDict['R_min']
     R_max = configDict['R_max']
     R_RANGE = (R_min, R_max)
+    Fixed_PPO = True
+    Traditional_Contract = True
 
     # 使用双端队列来记录指标,最大元素为每一批次的步数
     avg_reward_per_episode = deque(maxlen=batch_size)
     avg_utility_per_episode = deque(maxlen=batch_size)
 
-    avg_reward_per_episode_list = []
-    avg_utility_per_episode_list = []
-    actor_loss_list = []
-    critic_loss_list = []
-    entropy_list = []
-
     # 记录每20轮的激励，用来判断学习率是否需要更新
     rewards_window = deque(maxlen=10)
     best_mean_reward = -float('inf')
 
+    metrics_dict = {
+        # "avg_agents_utility": [],
+        "mappo_contract": [],
+        "traditional_contract": [],
+        "fixed_pricing": [],
+        "Average_Policy_Loss": [],
+        "Average_Value_Loss": [],
+        "Average_Entropy": []
+    }
+    Optimizer_Change = False
     # 创建MAPPO智能体（共有agent_num个actor, 一个共享critic）
     mappo = MAPPO(agent_num, state_dim, action_dim, actor_lr, critic_lr, lmbda, gamma, eps, K_epochs, device, R_RANGE,total_episode)
+    if Fixed_PPO:
+        fixed_state_dim = env.agent_num * env.uav_num
+        fixed_action_dim = env.uav_num + 1
+        ppo = PPO(fixed_state_dim,fixed_action_dim)
+        fixed_env = copy.deepcopy(env)
+        if Optimizer_Change:
+            scheduler_actor = ReduceLROnPlateau(
+                    ppo.actor_optimizer,  # 监控它的优化器
+                    mode='max',  # 目标是 Reward 最大化
+                    factor=0.6,
+                    patience=100,
+                    threshold=1e-4,
+                    min_lr=1e-6,
+                    verbose=True
+                )
+
+    if Traditional_Contract:
+        traditional_env = copy.deepcopy(env)
 
     log.LogRecord('Initialize agents success......')
 
@@ -124,7 +154,7 @@ def Multi_Contract_Play():
             actions, log_probs = mappo.take_action(multi_states)
 
             # 根据多个智能体的动作，获取下一步的状态。
-            multi_reward, next_multi_state, contracts = env.Step(actions)
+            multi_reward, next_multi_state, contracts,mappo_acceptance_rate = env.Step(actions)
 
             # 将平均奖励作为每个智能体的奖励
             avg_reward = np.mean(multi_reward)
@@ -156,11 +186,17 @@ def Multi_Contract_Play():
         # 记录奖励值
         rewards_window.append(np.mean(avg_reward_per_episode))
 
-        # 保存模型的权重参数
-        if episode % 500 == 0:
-            mappo.save_model()
-            # log_message(f"Model saved at episode {episode}")
-            # 创建指标字典
+        if Traditional_Contract:
+            traditional_env.Reset()
+            optimizer = TraditionalContractOptimizer(traditional_env)
+            r_best, u_best, util = optimizer.solve()
+            tra_multi_reward, tra_next_multi_state, tra_contracts,tra_acceptance_rate = traditional_env.step_2(r_best,u_best,1)
+            traditional_reward = np.mean(tra_multi_reward)
+
+        if Fixed_PPO:
+            fixed_env.Reset()
+            fixed_state = [random.randint(0, 1) for _ in range(env.uav_num*env.agent_num)]
+            fixed_reward,fixed_contract, unit_price,fixed_acceptance_rate = run_fixed_train(ppo, fixed_env, fixed_state)
 
         # 每10轮修改一次学习率
         if episode%10 ==0:
@@ -170,7 +206,9 @@ def Multi_Contract_Play():
             ## 打印数据
             for i, contract in enumerate(contracts):
                 Log(f"agent[{i+1}]==>contract :{contract}",False)
-
+            Log(f"acceptance_rate==> mappo:{mappo_acceptance_rate}\n"
+                f"traditional_contract:{tra_acceptance_rate} and contract is {tra_contracts}\n"
+                f"fixed_pricing_ppo:{fixed_acceptance_rate} and contract is {fixed_contract} unit_price == >{unit_price} \n",False)
             # 计算平滑后的平均奖励
             mean_reward = np.mean(rewards_window)
             # 检查是否是历史最佳
@@ -182,18 +220,13 @@ def Multi_Contract_Play():
                 scheduler.step(mean_reward)
             mappo.critic_scheduler.step(mean_reward)
 
-            avg_utility_per_episode_list.append(np.mean(avg_utility_per_episode))
-            avg_reward_per_episode_list.append(np.mean(avg_reward_per_episode))
-            actor_loss_list.append(a_loss)
-            critic_loss_list.append(c_loss)
-            entropy_list.append(entropy)
-            metrics_dict = {
-                "avg_agents_utility": avg_utility_per_episode_list,
-                "avg_rewards": avg_reward_per_episode_list,
-                "Average_Policy_Loss": actor_loss_list,
-                "Average_Value_Loss": critic_loss_list,
-                "Average_Entropy": entropy_list
-            }
+            metrics_dict['mappo_contract'].append(avg_reward)
+            metrics_dict['traditional_contract'].append(traditional_reward)
+            metrics_dict['fixed_pricing'].append(fixed_reward)
+            if Fixed_PPO:
+                if Optimizer_Change:
+                    scheduler_actor.step(fixed_reward)
+
             # 调用新的绘图函数
             # plot_all_metrics(metrics_dict, episode)
             plot_learning_curves(metrics_dict, episode, 'mappo', window_size=20)
@@ -205,9 +238,23 @@ def Multi_Contract_Play():
             record_data.save_to_csv('agent', 'agent_results.csv')
             record_data.save_to_csv('uav', 'uav_results.csv')
 
+        # 保存模型的权重参数
+        if episode % 500 == 0:
+            mappo.save_model()
+
+
+    return metrics_dict
+
 
         # ------------------------------------------------------------------
 if __name__ == '__main__':
-    Multi_Contract_Play()
-    current_time = datetime.now()
-    print(f"训练结束时间为：{current_time}")
+    metrics_dict = Multi_Contract_Play()
+ # 1. 实例化管理器
+    data_manager = ExperimentDataManager(save_dir="results/my_experiments")
+
+    # 2. 调用保存接口 (直接用 变量名=变量 的形式传进去，非常方便)
+    data_manager.save_metrics(
+        filename="uti_compare",
+        total_uti=metrics_dict
+    )
+    plot_learning_curves_(metrics_dict,3000,'TOTAL_UTILTY',window_size=20,combine_plots=True)
