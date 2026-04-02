@@ -158,7 +158,7 @@ class Multi_Contract_Environment:
 
         for i in range(1,self.uav_num+1):
             uav = UAV(f'uav_{i}', E_tot_list[i-1], self.E_u)
-            uav.resource_limit = E_tot_list[i-1]*self.uav_num * 30
+            uav.resource_limit = E_tot_list[i-1]*self.agent_num * 30
             uav.resource_base = uav.resource_limit
             self.UAVs.append(uav)
         for i in range(1,self.agent_num+1):
