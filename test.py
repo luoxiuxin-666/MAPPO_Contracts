@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # @Time    : 2025/6/22 0022 16:38
 # @Author  : ZhengHao
-# @File    : test_3.py
+# @File    : picture_other.py
 from ortools.algorithms.python import knapsack_solver
 import numpy as np
 

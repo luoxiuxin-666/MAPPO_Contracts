@@ -123,6 +123,7 @@ class Multi_Contract_Environment:
         self.UAVs = []
         self.Agents = []
         # 计算所以集群的能耗，并按照升序排序
+        self.E_total_list = []
         E_tot_list = []
         for i in range(self.uav_num):
             # 获取随机数值
@@ -147,7 +148,6 @@ class Multi_Contract_Environment:
             total_energy = self.Calculate_total_energy(f_k, B_1_k, rho_k, h_k, B_2_k, rho_u, h_u)
 
             E_tot_list.append(total_energy)
-
         # 计算无人机补偿的能耗
         self.E_u = self.Calculate_E_u()
 
@@ -155,10 +155,11 @@ class Multi_Contract_Environment:
         E_tot_list.sort()
         print(f"the E_tot_list is {E_tot_list}")
         print(f"the E_u is {self.E_u}")
-
+        self.E_total_list = E_tot_list
         for i in range(1,self.uav_num+1):
             uav = UAV(f'uav_{i}', E_tot_list[i-1], self.E_u)
-            uav.resource_limit = E_tot_list[i-1]*(self.agent_num-0.5) * (35-(i-1)*5) # 默认留出竞争空间
+            # self.agent_num
+            uav.resource_limit = E_tot_list[i-1]*(3-0.5) * (35-(i-1)*5) # 默认留出竞争空间
             uav.resource_base = uav.resource_limit
             self.UAVs.append(uav)
         for i in range(1,self.agent_num+1):
@@ -345,6 +346,8 @@ class Multi_Contract_Environment:
     def Step(self, multi_action):
         contracts = []
         # 1. 为每个智能体解码动作，并更新其内部状态
+        total_utility_matrix = []
+        ic_total = 0
         for i, agent in enumerate(self.Agents):
             # a) 从原始动作重构出满足单调性的R向量
             raw_agent_action = multi_action[i]
@@ -359,6 +362,11 @@ class Multi_Contract_Environment:
             # d) 检查 IR 约束
             self._check_constraints(agent)
 
+            utility_matrix, ic_count = self.calculate_utility_matrix(R_k, U_k)
+
+            total_utility_matrix.append(utility_matrix)
+            ic_total += ic_count
+
         self._uavs_select_contracts_dp()
 
         multi_reward = self._compute_all_rewards()
@@ -369,7 +377,59 @@ class Multi_Contract_Environment:
 
         # 记录一下集群的选择以及效用
         self.record_UAVs_Utility()
-        return multi_reward, next_multi_state, contracts,acceptance_rate
+        return multi_reward, next_multi_state, contracts,acceptance_rate,total_utility_matrix,ic_total
+
+    def calculate_utility_matrix(self, R,U):
+        '''
+        计算效用矩阵，并同时验证 IC (激励相容) 约束的满足概率。
+
+        返回:
+            dn_utility_matrix (ndarray): 数据节点效用矩阵 N x N
+            cn_utility_matrix (ndarray): 算力节点效用矩阵 M x M
+            dn_ic_rate (float): 数据节点满足 IC 的比例 [0.0 ~ 1.0]
+            cn_ic_rate (float): 算力节点满足 IC 的比例 [0.0 ~ 1.0]
+        '''
+        N = len(R)
+
+
+        # 2. 初始化矩阵
+        utility_matrix = np.zeros((N, N))
+
+        # 用于记录满足 IC 的节点数量
+        ic_count = 0
+
+        ic = np.ones(N)
+        # 容忍浮点数误差的阈值 (非常关键，否则可能因为 0.0000001 的差别被误判为违反 IC)
+        TOLERANCE = 1e-5
+
+        # =========================================================
+        # 3. 评估数据节点 (DN)
+        # =========================================================
+        for i in range(N):
+            E_total = self.E_total_list[i]  # 物理节点 i
+            # 计算该节点面对所有 N 个合同的效用
+            for j in range(N):
+                r_req = R[j]
+                u_offer = U[j]
+                # 注意参数顺序要与 evaluate_contract 定义一致
+                uti = u_offer - r_req * E_total
+                utility_matrix[i, j] = uti
+
+            # --- 验证 DN 的 IC ---
+            # 获取节点 i 选自己合同的效用 (对角线元素)
+            u_own = utility_matrix[i, i]
+            # 检查是否有任何其他合同的效用 严格大于 自己的合同
+            # 如果没有，说明满足 IC
+            is_ic_satisfied = True
+            for j in range(N):
+                if i != j and utility_matrix[i, j] > u_own + TOLERANCE:
+                    is_ic_satisfied = False
+                    ic[i] = 0
+                    break  # 只要发现一个更好的，就违反了 IC
+
+            if is_ic_satisfied:
+                ic_count += 1
+        return utility_matrix, ic_count
 
     def _compute_agent_utility(self, agent):
         """计算单个智能体的总效用，只计入被选中的合同。"""

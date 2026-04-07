@@ -102,7 +102,7 @@ def Multi_Contract_Play():
         "Average_Value_Loss": [],
         "Average_Entropy": []
     }
-    Optimizer_Change = False
+    Optimizer_Change = True
     # 创建MAPPO智能体（共有agent_num个actor, 一个共享critic）
     mappo = MAPPO(agent_num, state_dim, action_dim, actor_lr, critic_lr, lmbda, gamma, eps, K_epochs, device, R_RANGE,total_episode)
     if Fixed_PPO:
@@ -154,7 +154,7 @@ def Multi_Contract_Play():
             actions, log_probs = mappo.take_action(multi_states)
 
             # 根据多个智能体的动作，获取下一步的状态。
-            multi_reward, next_multi_state, contracts,mappo_acceptance_rate = env.Step(actions)
+            multi_reward, next_multi_state, contracts,mappo_acceptance_rate,total_utility_matrix,ic_total = env.Step(actions)
 
             # 将平均奖励作为每个智能体的奖励
             avg_reward = np.mean(multi_reward)
@@ -230,6 +230,11 @@ def Multi_Contract_Play():
             # 调用新的绘图函数
             # plot_all_metrics(metrics_dict, episode)
             plot_learning_curves(metrics_dict, episode, 'mappo', window_size=20)
+
+            # ic约束
+            if ic_total == env.uav_num * env.agent_num and episode%300 ==0:
+                Log(f"IC_uti:{total_utility_matrix[0]}",False)
+
             # 记录数据
             record_data.log_agent_data(episode)
             record_data.log_uav_data(episode)

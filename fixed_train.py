@@ -7,8 +7,8 @@ def decode_ppo_to_ru(raw_action,env):
     raw_action: PPO 输出的 numpy 数组 [a1, a2, ..., aK, ap]
     """
     uav_num = env.uav_num
-    R_min = 5
-    R_max = 40
+    R_min = 10
+    R_max = 50
     P_min = env.UAVs[0].total_energy
     P_max = 1.1*env.UAVs[uav_num-1].total_energy
     DELTA = env.DELTA
