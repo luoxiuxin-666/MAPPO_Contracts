@@ -155,7 +155,8 @@ def Multi_Contract_Play():
 
             # 根据多个智能体的动作，获取下一步的状态。
             multi_reward, next_multi_state, contracts,mappo_acceptance_rate,total_utility_matrix,ic_total = env.Step(actions)
-
+            ppo_cluster_utility = [ uav.utility_all for uav in env.UAVs]
+            ppo_cluster_rate = [uav.Utilization_rate for uav in env.UAVs]
             # 将平均奖励作为每个智能体的奖励
             avg_reward = np.mean(multi_reward)
             std_reward = np.std(multi_reward)
@@ -191,12 +192,16 @@ def Multi_Contract_Play():
             optimizer = TraditionalContractOptimizer(traditional_env)
             r_best, u_best, util = optimizer.solve()
             tra_multi_reward, tra_next_multi_state, tra_contracts,tra_acceptance_rate = traditional_env.step_2(r_best,u_best,1)
+            traditional_cluster_utility = [uav.utility_all for uav in traditional_env.UAVs]
+            traditional_cluster_rate = [uav.Utilization_rate for uav in traditional_env.UAVs]
             traditional_reward = np.mean(tra_multi_reward)
 
         if Fixed_PPO:
             fixed_env.Reset()
             fixed_state = [random.randint(0, 1) for _ in range(env.uav_num*env.agent_num)]
             fixed_reward,fixed_contract, unit_price,fixed_acceptance_rate = run_fixed_train(ppo, fixed_env, fixed_state)
+            fixed_cluster_utility = [uav.utility_all for uav in fixed_env.UAVs]
+            fixed_cluster_rate = [uav.Utilization_rate for uav in fixed_env.UAVs]
 
         # 每10轮修改一次学习率
         if episode%10 ==0:
@@ -206,9 +211,14 @@ def Multi_Contract_Play():
             ## 打印数据
             for i, contract in enumerate(contracts):
                 Log(f"agent[{i+1}]==>contract :{contract}",False)
-            Log(f"acceptance_rate==> mappo:{mappo_acceptance_rate}\n"
-                f"traditional_contract:{tra_acceptance_rate} and contract is {tra_contracts}\n"
-                f"fixed_pricing_ppo:{fixed_acceptance_rate} and contract is {fixed_contract} unit_price == >{unit_price} \n",False)
+            # Log(f"acceptance_rate==> mappo:{mappo_acceptance_rate}\n"
+            #     f"traditional_contract:{tra_acceptance_rate} and contract is {tra_contracts}\n"
+            #     f"fixed_pricing_ppo:{fixed_acceptance_rate} and contract is {fixed_contract} unit_price == >{unit_price} \n",False)
+
+            message = (f"ppo_cluster_utility = {ppo_cluster_utility};ppo_cluster_rate = {ppo_cluster_rate}\n"
+                       f"traditional_cluster_utility = {traditional_cluster_utility} ; traditional_cluster_rate = {traditional_cluster_rate} \n"
+                       f"fixed_cluster_utility = {fixed_cluster_utility} ; fixed_cluster_rate = {fixed_cluster_rate} \n" )
+            Log(message,False)
             # 计算平滑后的平均奖励
             mean_reward = np.mean(rewards_window)
             # 检查是否是历史最佳
@@ -232,8 +242,8 @@ def Multi_Contract_Play():
             plot_learning_curves(metrics_dict, episode, 'mappo', window_size=20)
 
             # ic约束
-            if ic_total == env.uav_num * env.agent_num and episode%300 ==0:
-                Log(f"IC_uti:{total_utility_matrix[0]}",False)
+            # if ic_total == env.uav_num * env.agent_num and episode%300 ==0:
+            #     Log(f"IC_uti:{total_utility_matrix[0]}",False)
 
             # 记录数据
             record_data.log_agent_data(episode)

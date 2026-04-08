@@ -19,6 +19,9 @@ class UAV:
         self.resource_base = 0
         self.resource_limit = 0   # E_k^all: 资源上限
         self.E_u = E_u
+        self.used_energy = 0
+        self.utility_all = 0
+        self.Utilization_rate = 0
 
         self.select_Agent = []
         self.utility_list = []
@@ -159,7 +162,7 @@ class Multi_Contract_Environment:
         for i in range(1,self.uav_num+1):
             uav = UAV(f'uav_{i}', E_tot_list[i-1], self.E_u)
             # self.agent_num
-            uav.resource_limit = E_tot_list[i-1]*(3-0.5) * (35-(i-1)*5) # 默认留出竞争空间
+            uav.resource_limit = E_tot_list[i-1]*(self.agent_num) * (35-(i-1)*5) # 默认留出竞争空间
             uav.resource_base = uav.resource_limit
             self.UAVs.append(uav)
         for i in range(1,self.agent_num+1):
@@ -341,6 +344,8 @@ class Multi_Contract_Environment:
         for uav in self.UAVs:
             base = rng.integers(-5, 5)
             uav.resource_limit = uav.resource_base + base
+            uav.utility_all = 0
+            uav.Utilization_rate = 0
         return self.Get_Multi_State(), {}
 
     def Step(self, multi_action):
@@ -378,6 +383,8 @@ class Multi_Contract_Environment:
         # 记录一下集群的选择以及效用
         self.record_UAVs_Utility()
         return multi_reward, next_multi_state, contracts,acceptance_rate,total_utility_matrix,ic_total
+
+
 
     def calculate_utility_matrix(self, R,U):
         '''
@@ -467,12 +474,19 @@ class Multi_Contract_Environment:
     def record_UAVs_Utility(self):
         '''激励一下每轮集群的选择，以及能耗'''
         for i, uav in enumerate(self.UAVs):
+            uav.used_energy = 0
+            uav.utility = 0.0
             uav.select_Agent = []
             uav.utility_list = []
             for j, agent in enumerate(self.Agents):
                 if agent.P_State_List[i] == 1:
                     uav.select_Agent.append(j)
                     uav.utility_list.append(agent.uav_u_list[i] - agent.uav_r_list[i]*uav.total_energy)
+                    uav.used_energy += agent.uav_r_list[i]*uav.total_energy
+
+        for uav in self.UAVs:
+            uav.Utilization_rate = float(uav.used_energy / uav.resource_limit)
+            uav.utility_all = np.sum(uav.utility_list)
 
     def step_2(self,R_k,U_k,mode):
         contracts = []
